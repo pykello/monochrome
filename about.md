@@ -1,5 +1,5 @@
 ---
-layout: page
+layout: expage
 title: About Monochrome
 description: This page describes monochrome.
 ---

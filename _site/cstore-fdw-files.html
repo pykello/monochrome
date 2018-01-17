@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<!-- Meta -->
+	<meta charset="UTF-8"/>
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+	<meta name="generator" content="Jekyll">
+
+	<title>cstore_fdw and 'Files are Hard'</title>
+  <meta name="description" content="My thoughts, obeservations, and experiments">
+
+	<!-- CSS & fonts -->
+	<link rel="stylesheet" href="/css/main.css">
+
+	<!-- RSS -->
+	<link href="/atom.xml" type="application/atom+xml" rel="alternate" title="ATOM Feed" />
+
+  <!-- Favicon -->
+  <link rel="shortcut icon" type="image/png" href="img/favicon.png">
+
+</head>
+
+
+<body>
+	<div id="wrap">
+	  	
+	  	<!-- Navigation -->
+	  	<nav id="nav">
+	<div id="nav-list">
+		<a href="/">Home</a>
+
+		<!-- Nav pages -->
+	  
+	    
+	  
+	    
+	  
+	    
+	  
+	    
+	  
+	    
+	  
+	    
+	  
+	    
+	  
+	    
+	  
+	    
+	  
+	    
+	  
+	    
+	  
+	    
+	  
+	    
+	  
+	    
+	  
+	    
+	  
+	    
+	  
+	    
+	  
+	    
+	  
+	    
+	  
+    
+    <!-- Nav links -->
+	  <!-- <a href="https://github.com/thereviewindex/monochrome/archive/master.zip">Download</a>
+<a href="https://github.com/thereviewindex/monochrome">Project on Github</a>
+ -->
+
+	</div>
+  
+  <!-- Nav footer -->
+	
+	  <footer>
+	
+	<span>version 1.0.0</span>
+
+</footer>
+	
+
+</nav>
+
+    
+    <!-- Icon menu -->
+	  <a id="nav-menu">
+	  	<div id="menu"></div>
+	  </a>
+
+      <!-- Header -->
+      
+        <header id="header" class="parent justify-spaceBetween">
+  <div class="inner w100 relative">
+    <span class="f-left">  
+      <a href="/">
+        <h1>
+          <span>the</span>lost<span>packet</span>
+        </h1>
+      </a>
+    </span>
+    <span id="nav-links" class="absolute right bottom">
+      <!-- Nav pages -->
+	    
+	      
+	    
+	      
+	    
+	      
+	    
+	      
+	    
+	      
+	    
+	      
+	    
+	      
+	    
+	      
+	    
+	      
+	    
+	      
+	    
+	      
+	    
+	      
+	    
+	      
+	    
+	      
+	    
+	      
+	    
+	      
+	    
+	      
+	    
+	      
+	    
+	      
+	    
+      
+      <!-- Nav links -->
+	    <!-- <a href="https://github.com/thereviewindex/monochrome/archive/master.zip">Download</a>
+<a href="https://github.com/thereviewindex/monochrome">Project on Github</a>
+ -->
+
+    </span>
+  </div>
+</header>
+
+
+
+
+      
+
+    <!-- Main content -->
+	  <div id="container">
+		  
+		<main>
+
+			<article id="post-page">
+	<h2>cstore_fdw and 'Files are Hard'</h2>		
+	<time datetime="2015-12-15T00:00:00-05:00" class="by-line">15 Dec 2015</time>
+	<div class="content">
+
+		<p>I recently came accross the “<a href="http://danluu.com/file-consistency/">Files are hard</a>” article, and it
+made me wonder how reliable is cstore_fdw’s design and implementation.
+<a href="https://github.com/citusdata/cstore_fdw/">cstore_fdw</a> is a columnar store for PostgreSQL that I designed and
+developed in my previous job at Citus Data.</p>
+
+<p>I am writing this post so my decisions for cstore_fdw’s design get reviewed by
+more people, and I get some feedback and improve the design.</p>
+
+<!-- more -->
+
+<h2 id="file-structure">File Structure</h2>
+
+<p>Structure of cstore_fdw is similar to <a href="https://cwiki.apache.org/confluence/display/Hive/LanguageManual+ORC">Hive’s ORC</a>, but with some differences.
+One of the biggest differences is that cstore_fdw stores metadata in a separate
+file, while ORC stores it at the end of data file.
+The reason for this difference? It made avoiding data corruption much easier, as
+we will see later.</p>
+
+<p>Each cstore_fdw table consists of two files:</p>
+
+<ul>
+  <li>Data file</li>
+  <li>Metadata file</li>
+</ul>
+
+<h3 id="data-file">Data File</h3>
+
+<p>cstore_fdw divides rows into stripes. Each stripe is 150K rows by default. For
+each stripe data is stored in column oriented manner.</p>
+
+<p><img src="/img/cstore-layout.svg" alt="cstore-layout" /></p>
+
+<h3 id="metadata-file">Metadata File</h3>
+
+<p>Metadata file is a small file which contains some version infomration, plus
+outline of the data file. This includes location and size of each stripe.</p>
+
+<h2 id="operations">Operations</h2>
+
+<p>Currently the only modification operation that cstore_fdw supports is batch
+insertion, which can be triggered using:</p>
+
+<figure class="highlight"><pre><code class="language-sql" data-lang="sql"><span class="k">COPY</span> <span class="n">cstore_table</span> <span class="k">FROM</span> <span class="s1">'/path/to/file.csv'</span> <span class="k">WITH</span> <span class="n">CSV</span><span class="p">;</span></code></pre></figure>
+
+<p>or:</p>
+
+<figure class="highlight"><pre><code class="language-sql" data-lang="sql"><span class="k">INSERT</span> <span class="k">INTO</span> <span class="n">cstore_table</span> <span class="k">FROM</span> <span class="k">SELECT</span> <span class="o">*</span> <span class="k">FROM</span> <span class="n">some_other_table</span> <span class="k">WHERE</span> <span class="n">some_condition</span></code></pre></figure>
+
+<p>Our plans were to first get batch inserts right, as this on its own was very
+useful to our customers who used it to store archive data. Then add support
+for single row inserts, deletes, and updates.</p>
+
+<p>What does happen when we do a batch load?</p>
+
+<ul>
+  <li>For every 150K rows construct a new stripe and append it to the data file.
+While doing this, never touch the metadata file.</li>
+  <li>Sync and close the data file.</li>
+  <li>Create a temporary metadata file, and write the metadata which represents the
+newly inserted data to it.</li>
+  <li>Sync and close the temporary metadata file.</li>
+  <li>Rename the temporary metadata file to the main metadata file.</li>
+</ul>
+
+<p>If the system crashes during the first four steps, the table is still in a
+consistent state and we won’t have data corruption.</p>
+
+<p>This is because:</p>
+
+<ul>
+  <li>We don’t change the main metadata file in these steps.</li>
+  <li>We don’t overwrite or move the old data in the data file.</li>
+</ul>
+
+<p>What about 5th step? The nice thing here is that the <a href="http://pubs.opengroup.org/onlinepubs/009695399/functions/rename.html">specification</a>
+of the rename system call requires it to be automic. So this step either is done
+in full (in which case we’ll see the new data) or isn’t done at all (in which
+case we’ll see the old data, but we won’t have data corruption).</p>
+
+<p>And that is the reason for using a separate file for metadata. I needed an
+atomic operation to rely on, and rename is atomic. Rewriting the whole data
+in a new file and doing the rename for data file wasn’t an option, since it is
+very expensive. So instead, we rewrite the small metadata file and do the rename
+for that.</p>
+
+<p>Of course there were some other designs which avoided file corruption, but I found
+this design very simple compared to other designs.</p>
+
+<p>Reading the <a href="https://news.ycombinator.com/item?id=10729132">discussion in hacker news</a> for “Files are hard”, I see that
+I’ve missed a step, which is doing a sync on the parent directory to make the
+rename durable. That is something we should fix, but I’m happy that our design
+seem to avoid most of the issues discussed in “Files are hard”.</p>
+
+<h2 id="links">Links</h2>
+
+<ul>
+  <li><a href="https://news.ycombinator.com/item?id=10741385">Hacker News Discussion</a></li>
+</ul>
+
+
+		
+	</div>
+	
+	  <div id="disqus_thread"></div>
+<script type="text/javascript">
+    var disqus_shortname = '';
+	(function() {
+	    var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+	    dsq.src = 'https://' + disqus_shortname + '.disqus.com/embed.js';
+	    (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+    })();
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+
+	
+</article>
+
+
+
+	  </main>
+		
+		  <!-- Pagination links -->
+      
+
+	  </div>
+	    
+	    <!-- Footer -->
+	    <footer><span>@2017 - Monochrome</span></footer>
+
+
+	    <!-- Script -->
+      <script src="/js/main.js"></script>	
+
+
+	</div>
+</body>
+</html>

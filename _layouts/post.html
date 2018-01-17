@@ -9,5 +9,8 @@ layout: default
 		{{ content }}
 		
 	</div>
+	{% if page.comments != false %}
+	  {% include disqus.html %}
+	{% endif %}
 </article>
 
